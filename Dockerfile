@@ -1,25 +1,52 @@
-FROM haakco/stage3-ubuntu-20.04-php7.4-lv
+FROM php:8.0-fpm
 
-USER www-data
+# Copy composer.lock and composer.json
+COPY composer.lock composer.json /var/www/
 
-## Cleanout previous dev just in case
-RUN rm -rf /var/www/site/*
+# Set working directory
+WORKDIR /var/www
 
-ADD --chown=www-data:www-data . /var/www/site
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    mariadb-client \
+    libpng-dev \
+    libjpeg62-turbo-dev \
+    libfreetype6-dev \
+    locales \
+    libzip-dev \
+    zip \
+    jpegoptim optipng pngquant gifsicle \
+    vim \
+    unzip \
+    git \
+    curl \
+    libonig-dev
 
-WORKDIR /var/www/site
+# Clear cache
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN composer install --no-ansi --no-suggest --no-scripts --prefer-dist --no-progress --no-interaction \
-      --optimize-autoloader
+# Install extensions
+RUN docker-php-ext-install pdo_mysql mbstring zip exif pcntl
+RUN docker-php-ext-configure gd --with-freetype=/usr/include/ --with-jpeg=/usr/include/
+RUN docker-php-ext-install gd
 
-USER root
+# Install composer
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
-RUN find /usr/share/GeoIP -not -user www-data -execdir chown "www-data:" {} \+ && \
-    find /var/www/site -not -user www-data -execdir chown "www-data:" {} \+
+# Add user for laravel application
+RUN groupadd -g 1000 www
+RUN useradd -u 1000 -ms /bin/bash -g www www
 
-#HEALTHCHECK \
-#  --interval=30s \
-#  --timeout=60s \
-#  --retries=10 \
-#  --start-period=60s \
-#  CMD if [[ "$(curl -f http://127.0.0.1/ | jq -e . >/dev/null 2>&1)" != "0" ]]; then exit 1; else exit 0; fi
+# Copy existing application directory contents
+COPY . /var/www
+
+# Copy existing application directory permissions
+COPY --chown=www:www . /var/www
+
+# Change current user to www
+USER www
+
+# Expose port 9000 and start php-fpm server
+EXPOSE 9000
+CMD ["php-fpm"]
